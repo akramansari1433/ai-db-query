@@ -1,9 +1,9 @@
-import { experimental_createMCPClient, generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
+import { experimental_createMCPClient, generateText, ToolExecutionOptions } from "ai";
+import { createGroq } from "@ai-sdk/groq";
 
-const openai = createOpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  compatibility: "strict",
+
+const groq = createGroq({
+  apiKey: process.env.GROQ_API_KEY,
 });
 
 export async function POST(req: Request) {
@@ -13,11 +13,26 @@ export async function POST(req: Request) {
     const sseClient = await experimental_createMCPClient({
       transport: {
         type: "sse",
-        url: "https://db-query-mcp-server.akram-ansari-c95.workers.dev/sse",
+        url: "https://ai-db-query.akramansari1433.workers.dev/sse",
       },
     });
 
-    const tools = await sseClient.tools();
+    const mcpTools = await sseClient.tools();
+
+    // Wrap tools to handle null arguments (convert to empty object)
+    const tools = Object.fromEntries(
+      Object.entries(mcpTools).map(([name, tool]) => [
+        name,
+        {
+          ...tool,
+          execute: async (args: unknown, options: ToolExecutionOptions) => {
+            // Convert null or undefined to empty object
+            const safeArgs = args ?? {};
+            return tool.execute(safeArgs, options);
+          },
+        },
+      ])
+    );
 
     const systemPrompt =
       type === "chart"
@@ -62,7 +77,7 @@ export async function POST(req: Request) {
             IMPORTANT: Output only the JSON object, no markdown or additional text.`;
 
     const { text } = await generateText({
-      model: openai("gpt-4o-mini"),
+      model: groq("llama-3.3-70b-versatile"),
       tools,
       prompt,
       system: systemPrompt,
