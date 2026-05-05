@@ -1,0 +1,21 @@
+{
+  "name": "ai-db-query-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "dev:web": "npm run dev --workspace=@ai-db-query/web",
+    "dev:mcp": "npm run dev --workspace=@ai-db-query/mcp-server",
+    "build:web": "npm run build --workspace=@ai-db-query/web",
+    "deploy:mcp": "npm run deploy --workspace=@ai-db-query/mcp-server"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
