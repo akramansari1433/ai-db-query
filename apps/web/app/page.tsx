@@ -1,210 +1,208 @@
 "use client";
 
-import { useState, KeyboardEvent, ChangeEvent } from "react";
-import { Input } from "@/components/ui/input";
+import { useCallback, useEffect, useState } from "react";
+import { Database, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
-
-// Define the result interface
-interface QueryResult {
-  success: boolean;
-  data?: Record<string, string | number | boolean | null>[];
-  columns?: string[];
-  error?: string;
-}
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ConnectionDialog } from "@/components/connection-dialog";
+import { SchemaSidebar } from "@/components/schema-sidebar";
+import { TableDetail } from "@/components/table-detail";
+import { AIQueryPanel } from "@/components/ai-query-panel";
+import { getConnectionUrl } from "@/lib/connection";
+import { getHostLabel } from "@/lib/validate-pg-url";
+import type { Schema } from "@/lib/types";
 
 export default function Home() {
-  const [prompt, setPrompt] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<QueryResult | null>(null);
-  const [rawOutput, setRawOutput] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"table" | "chart">("table");
+  const [hydrated, setHydrated] = useState(false);
+  const [connectionUrl, setConnectionUrlState] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      handleQuery();
-    }
-  };
+  const [schema, setSchema] = useState<Schema | null>(null);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setPrompt(e.target.value);
-  };
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"ai" | "table">("ai");
 
-  const handleQuery = async () => {
-    if (!prompt.trim()) return;
+  useEffect(() => {
+    setConnectionUrlState(getConnectionUrl());
+    setHydrated(true);
+  }, []);
 
-    setLoading(true);
-    setResult(null);
-    setRawOutput("");
-
+  const fetchSchema = useCallback(async (url: string) => {
+    setSchemaLoading(true);
+    setSchemaError(null);
     try {
-      const response = await fetch("/api/completion", {
+      const res = await fetch("/api/schema", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type: activeTab,
-          prompt,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ databaseUrl: url }),
       });
-
-      const text = await response.text();
-      setRawOutput(text);
-
-      try {
-        const data = JSON.parse(text);
-        setResult(data);
-      } catch (parseError) {
-        console.error("Failed to parse response as JSON:", parseError);
+      const data = await res.json();
+      if (!data.ok) {
+        setSchemaError(data.error ?? "Could not load schema.");
+        setSchema(null);
+        return;
       }
-    } catch (error) {
-      console.error("Error:", error);
+      setSchema(data.schema as Schema);
+    } catch (e) {
+      setSchemaError(e instanceof Error ? e.message : "Network error.");
+      setSchema(null);
     } finally {
-      setLoading(false);
+      setSchemaLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (connectionUrl) {
+      fetchSchema(connectionUrl);
+    } else {
+      setSchema(null);
+      setSelectedTable(null);
+    }
+  }, [connectionUrl, fetchSchema]);
+
+  const handleSaved = (url: string) => setConnectionUrlState(url);
+  const handleCleared = () => {
+    setConnectionUrlState(null);
+    setSchema(null);
+    setSelectedTable(null);
   };
 
-  const renderTable = () => {
-    if (!result?.success || !result.data || !result.columns) return null;
+  const handleSelectTable = (name: string) => {
+    setSelectedTable(name);
+    setActiveTab("table");
+  };
 
+  const handleRefreshSchema = () => {
+    if (connectionUrl) fetchSchema(connectionUrl);
+  };
+
+  if (!hydrated) {
+    return <main className="min-h-screen" />;
+  }
+
+  if (!connectionUrl) {
     return (
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {result.columns.map((column, index) => (
-                <TableHead key={index}>{column}</TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {result.data.map((row, rowIndex) => (
-              <TableRow key={rowIndex}>
-                {result.columns!.map((column, colIndex) => (
-                  <TableCell key={colIndex}>
-                    {row[column] !== null && row[column] !== undefined ? String(row[column]) : "NULL"}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <main className="flex min-h-screen flex-col">
+        <Header connectionUrl={null} onOpenSettings={() => setSettingsOpen(true)} />
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="flex max-w-md flex-col items-center gap-3 rounded-md border border-dashed p-10 text-center">
+            <Database className="size-10 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">Connect a database</h2>
+            <p className="text-sm text-muted-foreground">
+              Add a PostgreSQL connection URL to browse tables and run AI-powered queries.
+            </p>
+            <Button onClick={() => setSettingsOpen(true)}>Connect database</Button>
+          </div>
+        </div>
+        <ConnectionDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          onSaved={handleSaved}
+          onCleared={handleCleared}
+        />
+      </main>
     );
-  };
-
-  const renderChart = () => {
-    if (!result?.success || !result.data || !result.columns) return null;
-
-    // For simplicity, we'll use the first column as X-axis and second column as Y-axis
-    // You can make this more dynamic based on your needs
-    const xAxisKey = result.columns[0];
-    const yAxisKey = result.columns[1];
-
-    const chartData = result.data.map((row) => ({
-      name: String(row[xAxisKey]),
-      value: Number(row[yAxisKey]) || 0,
-    }));
-
-    // Calculate dynamic width based on number of data points
-    // Minimum 80px per bar to ensure x-axis labels are readable
-    const minWidth = Math.max(800, chartData.length * 80);
-
-    return (
-      <div className="overflow-x-auto">
-        <ChartContainer
-          config={{
-            value: {
-              label: yAxisKey,
-              color: "#2563eb",
-            },
-          }}
-          className="h-[400px]"
-          style={{ minWidth: `${minWidth}px` }}
-        >
-          <BarChart data={chartData} width={minWidth} height={400}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" interval={0} angle={-45} textAnchor="end" height={60} />
-            <YAxis />
-            <ChartTooltip
-              content={({ active, payload }) => (
-                <ChartTooltipContent active={active} payload={payload} label={xAxisKey} />
-              )}
-            />
-            <Bar dataKey="value" fill="#2563eb" />
-          </BarChart>
-        </ChartContainer>
-      </div>
-    );
-  };
+  }
 
   return (
-    <main className="max-w-7xl mx-auto p-4">
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>AI Database Query</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <Tabs
-              value={activeTab}
-              onValueChange={(value) => setActiveTab(value as "table" | "chart")}
-              className="w-full"
-            >
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="table">Table View</TabsTrigger>
-                <TabsTrigger value="chart">Chart View</TabsTrigger>
-              </TabsList>
-            </Tabs>
+    <main className="flex min-h-screen flex-col">
+      <Header connectionUrl={connectionUrl} onOpenSettings={() => setSettingsOpen(true)} />
 
-            <div className="flex gap-2">
-              <Input
-                placeholder={`Enter your ${activeTab} query (e.g., ${
-                  activeTab === "table" ? "'get all users'" : "'show user count by month'"
-                })`}
-                value={prompt}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-              />
-              <Button onClick={handleQuery} disabled={loading}>
-                {loading ? "Loading..." : "Query"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex flex-1 overflow-hidden">
+        <div className="hidden w-64 shrink-0 md:block">
+          <SchemaSidebar
+            schema={schema}
+            selectedTable={selectedTable}
+            onSelect={handleSelectTable}
+            onRefresh={handleRefreshSchema}
+            loading={schemaLoading}
+            error={schemaError}
+          />
+        </div>
 
-      <Card>
-        <CardContent>
-          {loading && (
-            <div className="flex justify-center p-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-900"></div>
-            </div>
-          )}
+        <div className="flex-1 overflow-y-auto p-6">
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as "ai" | "table")}
+            className="w-full"
+          >
+            <TabsList>
+              <TabsTrigger value="ai">Ask AI</TabsTrigger>
+              <TabsTrigger value="table" disabled={!selectedTable}>
+                {selectedTable ? `Table: ${selectedTable}` : "Table"}
+              </TabsTrigger>
+            </TabsList>
 
-          {!loading && !result && rawOutput && (
-            <div>
-              <div className="text-red-500 mb-2">Could not parse the result as JSON:</div>
-              <pre className="whitespace-pre-wrap font-mono bg-gray-100 p-4 rounded-md overflow-auto max-h-96">
-                {rawOutput}
-              </pre>
-            </div>
-          )}
+            <TabsContent value="ai" className="mt-6">
+              <AIQueryPanel databaseUrl={connectionUrl} />
+            </TabsContent>
 
-          {!loading && result && !result.success && <div className="text-red-500 p-4">{result.error}</div>}
+            <TabsContent value="table" className="mt-6">
+              {schema && selectedTable ? (
+                <TableDetail
+                  schema={schema}
+                  tableName={selectedTable}
+                  databaseUrl={connectionUrl}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Select a table from the sidebar to view its structure.
+                </p>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
+      </div>
 
-          {!loading && result && result.success && <div>{activeTab === "table" ? renderTable() : renderChart()}</div>}
+      <div className="border-t md:hidden">
+        <SchemaSidebar
+          schema={schema}
+          selectedTable={selectedTable}
+          onSelect={handleSelectTable}
+          onRefresh={handleRefreshSchema}
+          loading={schemaLoading}
+          error={schemaError}
+        />
+      </div>
 
-          {!loading && result && result.success && (!result.data || !result.columns) && (
-            <div className="p-4">Query executed successfully, but no data was returned.</div>
-          )}
-        </CardContent>
-      </Card>
+      <ConnectionDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onSaved={handleSaved}
+        onCleared={handleCleared}
+      />
     </main>
+  );
+}
+
+function Header({
+  connectionUrl,
+  onOpenSettings,
+}: {
+  connectionUrl: string | null;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <header className="flex items-center justify-between gap-4 border-b bg-background px-6 py-3">
+      <div className="flex items-center gap-3">
+        <Database className="size-5" />
+        <div>
+          <h1 className="text-base font-semibold leading-tight">AI Database Query</h1>
+          <p className="text-xs text-muted-foreground">
+            {connectionUrl ? `Connected · ${getHostLabel(connectionUrl)}` : "Not connected"}
+          </p>
+        </div>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenSettings}
+        aria-label="Connection settings"
+      >
+        <Settings className="size-4" />
+      </Button>
+    </header>
   );
 }
